@@ -1,0 +1,72 @@
+# Profiles:
+#   dev  -> docker compose --profile dev up   (watch mode, source bind-mounted)
+#   prod -> docker compose --profile prod up --build   (compiled image, closest to production)
+# The db service has no profile, so it starts with either one.
+
+x-api-env: &api-env
+  PORT: 3000
+  DB_HOST: db
+  DB_PORT: 5432
+  DB_USER: ${DB_USER:-postgres}
+  DB_PASSWORD: ${DB_PASSWORD:-postgres}
+  DB_NAME: ${DB_NAME:-minimundo}
+
+services:
+  db:
+    image: postgres:${POSTGRES_VERSION:-17}-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-minimundo}
+    ports:
+      - '${DB_HOST_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  api-dev:
+    profiles: [dev]
+    build:
+      context: .
+      target: dev
+    env_file:
+      - path: .env
+        required: false
+    environment: *api-env
+    ports:
+      - '${API_HOST_PORT:-3000}:3000'
+    volumes:
+      - .:/app
+      # Container-only node_modules: native packages must be Linux builds.
+      - node_modules:/app/node_modules
+      - pnpm-store:/pnpm/store
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    profiles: [prod]
+    build:
+      context: .
+      target: prod
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment: *api-env
+    ports:
+      - '${API_HOST_PORT:-3000}:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  node_modules:
+  pnpm-store:
